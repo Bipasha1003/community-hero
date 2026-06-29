@@ -329,8 +329,11 @@ export default function Landing() {
             </div>
             <div style={styles.footerLinks} className="ch-footer-links">
               {['Terms of use', 'Privacy policy', 'Accessibility', 'RTI', 'Contact'].map(l => (
-                <a key={l} href="#" style={styles.footerLink}>{l}</a>
-              ))}
+  <button key={l} onClick={() => {}} style={{
+    ...styles.footerLink,
+    background: 'none', border: 'none', cursor: 'pointer', padding: 0
+  }}>{l}</button>
+))}
             </div>
           </div>
           <div style={styles.footerBottom} className="ch-footer-bottom">

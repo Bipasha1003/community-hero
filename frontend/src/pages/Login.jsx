@@ -204,7 +204,10 @@ export default function Login() {
 
           <p style={s.hint}>
             By signing in you agree to the{' '}
-            <a href="#" className="ch-login-link" style={s.inlineLink}>Terms of Use</a>
+            <button className="ch-login-link" onClick={() => {}} style={{
+  ...s.inlineLink,
+  background: 'none', border: 'none', cursor: 'pointer', padding: 0
+}}>Terms of Use</button>
             {' '}of this Government of India portal.
           </p>
         </div>
