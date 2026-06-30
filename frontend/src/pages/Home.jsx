@@ -3,21 +3,22 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from '../firebase';
-import { GoogleMap, LoadScript, Marker, InfoWindow } from '@react-google-maps/api';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 // ── Design tokens (matches Landing.jsx) ──────────────────────────────────────
 const INDIA_BLUE  = '#1a3c6e';
 const SAFFRON     = '#FF6B00';
-const INDIA_GREEN = '#046A38';
 const OFF_WHITE   = '#F8F9FC';
 const BORDER_COL  = '#D8DEE9';
 const TEXT_MUTED  = '#6B7280';
 
 const STATUS_META = {
-  Reported:      { color: '#6B7280', bg: '#F3F4F6', label: 'Reported'    },
-  Verified:      { color: INDIA_BLUE, bg: '#EEF4FF', label: 'Verified'   },
-  'In Progress': { color: SAFFRON,   bg: '#FFF3E8', label: 'In Progress' },
-  Resolved:      { color: INDIA_GREEN, bg: '#EFFFEE', label: 'Resolved'  },
+  Reported:      { color: '#DC2626', bg: '#FEECEC', label: 'Reported'    },
+  Verified:      { color: '#2563EB', bg: '#EAF1FE', label: 'Verified'   },
+  'In Progress': { color: '#D4A017', bg: '#FEF9E0', label: 'In Progress' },
+  Resolved:      { color: '#16A34A', bg: '#E9FBEF', label: 'Resolved'  },
 };
 
 const CATEGORY_EMOJI = {
@@ -26,8 +27,35 @@ const CATEGORY_EMOJI = {
   'Damaged Infrastructure': '🏗️', 'Other': '⚠️',
 };
 
-const mapStyle    = { width: '100%', height: '420px' };
-const defaultCenter = { lat: 22.5726, lng: 88.3639 };
+const mapStyle      = { width: '100%', height: '420px' };
+const defaultCenter = [22.5726, 88.3639]; // [lat, lng] — Leaflet order
+
+// ── Custom colored pin icons (no external icon files needed) ──
+function makeIcon(color) {
+  return L.divIcon({
+    className: 'ch-custom-pin',
+    html: `
+      <div style="
+        width: 28px; height: 28px;
+        background: ${color};
+        border: 2.5px solid #fff;
+        border-radius: 50% 50% 50% 0;
+        transform: rotate(-45deg);
+        box-shadow: 0 2px 6px rgba(0,0,0,.35);
+      "></div>
+    `,
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+    popupAnchor: [0, -28],
+  });
+}
+
+const PIN_ICONS = {
+  Reported:      makeIcon(STATUS_META.Reported.color),
+  Verified:      makeIcon(STATUS_META.Verified.color),
+  'In Progress': makeIcon(STATUS_META['In Progress'].color),
+  Resolved:      makeIcon(STATUS_META.Resolved.color),
+};
 
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.Reported;
@@ -55,6 +83,17 @@ function SeverityBadge({ severity }) {
       fontSize: 12, fontWeight: 600,
     }}>{severity}</span>
   );
+}
+
+// Recenters/flies the map when a marker is selected from the list below
+function FlyToSelected({ selected }) {
+  const map = useMap();
+  useEffect(() => {
+    if (selected) {
+      map.flyTo([selected.latitude, selected.longitude], 15, { duration: 0.6 });
+    }
+  }, [selected, map]);
+  return null;
 }
 
 export default function Home() {
@@ -126,6 +165,11 @@ export default function Home() {
         .ch-upvote-btn:hover:not(:disabled) { background: ${INDIA_BLUE} !important; color: #fff !important; border-color: ${INDIA_BLUE} !important; }
         .ch-del-btn:hover { background: #FEECEC !important; }
 
+        /* Leaflet popup restyle to match portal */
+        .leaflet-popup-content-wrapper { border-radius: 6px !important; }
+        .leaflet-popup-content { margin: 12px 14px !important; font-family: 'Noto Sans', sans-serif !important; }
+        .leaflet-container { font-family: 'Noto Sans', sans-serif !important; }
+
         @media (max-width: 640px) {
           .ch-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
           .ch-issue-meta { flex-wrap: wrap !important; gap: 6px !important; }
@@ -160,64 +204,83 @@ export default function Home() {
         })}
       </div>
 
-      {/* Map */}
+      {/* Map — OpenStreetMap via Leaflet (free, no API key) */}
       <div style={s.mapWrap}>
-        <LoadScript googleMapsApiKey={process.env.REACT_APP_MAPS_API_KEY}>
-          <GoogleMap mapContainerStyle={mapStyle} center={defaultCenter} zoom={13}>
-            {issues.map(issue => (
-              <Marker key={issue.id}
-                position={{ lat: issue.latitude, lng: issue.longitude }}
-                onClick={() => setSelected(issue)}
-              />
-            ))}
-            {selected && (
-              <InfoWindow
-                position={{ lat: selected.latitude, lng: selected.longitude }}
-                onCloseClick={() => setSelected(null)}>
-                <div style={s.infoWin}>
+        <MapContainer
+          center={defaultCenter}
+          zoom={13}
+          style={mapStyle}
+          scrollWheelZoom={true}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          <FlyToSelected selected={selected} />
+
+          {issues.map(issue => (
+            <Marker
+              key={issue.id}
+              position={[issue.latitude, issue.longitude]}
+              icon={PIN_ICONS[issue.status] || PIN_ICONS.Reported}
+              eventHandlers={{ click: () => setSelected(issue) }}
+            >
+              <Popup>
+                <div style={s.popupInner}>
                   <strong style={{ fontSize: 14, color: INDIA_BLUE }}>
-                    {CATEGORY_EMOJI[selected.category]} {selected.title}
+                    {CATEGORY_EMOJI[issue.category]} {issue.title}
                   </strong>
-                  <p style={{ fontSize: 12.5, color: '#555', margin: '6px 0' }}>{selected.description}</p>
-                  {selected.imageBase64 && (
-                    <img src={selected.imageBase64} alt={selected.title}
-                      onClick={() => setExpandedImg(selected.imageBase64)}
+                  <p style={{ fontSize: 12.5, color: '#555', margin: '6px 0' }}>{issue.description}</p>
+                  {issue.imageBase64 && (
+                    <img src={issue.imageBase64} alt={issue.title}
+                      onClick={() => setExpandedImg(issue.imageBase64)}
                       style={{ width: '100%', maxHeight: 110, objectFit: 'cover',
                         borderRadius: 3, marginBottom: 8, cursor: 'pointer' }}
                     />
                   )}
                   <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <SeverityBadge severity={selected.severity} />
-                    <StatusBadge status={selected.status} />
+                    <SeverityBadge severity={issue.severity} />
+                    <StatusBadge status={issue.status} />
                   </div>
                   {isAdmin && (
-                    <select onChange={e => handleStatusChange(selected.id, e.target.value)}
-                      value={selected.status}
+                    <select onChange={e => handleStatusChange(issue.id, e.target.value)}
+                      value={issue.status}
                       style={{ ...s.select, width: '100%', marginBottom: 6 }}>
                       {statuses.map(st => <option key={st}>{st}</option>)}
                     </select>
                   )}
-                  <button onClick={() => handleUpvote(selected.id)}
-                    disabled={votedIssues.includes(selected.id)}
+                  <button onClick={() => handleUpvote(issue.id)}
+                    disabled={votedIssues.includes(issue.id)}
                     style={{
                       ...s.upvoteBtn,
-                      background: votedIssues.includes(selected.id) ? '#e5e7eb' : INDIA_BLUE,
-                      color: votedIssues.includes(selected.id) ? TEXT_MUTED : '#fff',
-                      cursor: votedIssues.includes(selected.id) ? 'not-allowed' : 'pointer',
+                      background: votedIssues.includes(issue.id) ? '#e5e7eb' : INDIA_BLUE,
+                      color: votedIssues.includes(issue.id) ? TEXT_MUTED : '#fff',
+                      cursor: votedIssues.includes(issue.id) ? 'not-allowed' : 'pointer',
                       width: '100%', marginBottom: 4,
                     }}>
-                    👍 {votedIssues.includes(selected.id) ? 'Upvoted' : 'Upvote'} ({selected.upvotes})
+                    👍 {votedIssues.includes(issue.id) ? 'Upvoted' : 'Upvote'} ({issue.upvotes})
                   </button>
                   {isAdmin && (
-                    <button onClick={() => handleDelete(selected.id)} style={{ ...s.deleteBtn, width: '100%' }}>
+                    <button onClick={() => handleDelete(issue.id)} style={{ ...s.deleteBtn, width: '100%' }}>
                       🗑️ Delete
                     </button>
                   )}
                 </div>
-              </InfoWindow>
-            )}
-          </GoogleMap>
-        </LoadScript>
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+
+        {/* Legend */}
+        <div style={s.mapLegend}>
+          {statuses.map(st => (
+            <span key={st} style={s.legendItem}>
+              <span style={{ ...s.legendDot, background: STATUS_META[st].color }} />
+              {STATUS_META[st].label}
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Issue list */}
@@ -273,7 +336,8 @@ export default function Home() {
         {/* Cards */}
         {filtered.map(issue => (
           <div key={issue.id} className="ch-issue-card"
-            style={{ ...s.issueCard, borderLeft: `4px solid ${(STATUS_META[issue.status] || STATUS_META.Reported).color}` }}>
+            onClick={() => setSelected(issue)}
+            style={{ ...s.issueCard, borderLeft: `4px solid ${(STATUS_META[issue.status] || STATUS_META.Reported).color}`, cursor: 'pointer' }}>
 
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', justifyContent: 'space-between' }}>
               {/* Main content */}
@@ -291,7 +355,8 @@ export default function Home() {
                     </div>
 
                     {isAdmin && (
-                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}
+                        onClick={e => e.stopPropagation()}>
                         <select value={issue.status}
                           onChange={e => handleStatusChange(issue.id, e.target.value)}
                           style={s.select}>
@@ -305,7 +370,7 @@ export default function Home() {
                   {issue.imageBase64 && (
                     <img src={issue.imageBase64} alt={issue.title}
                       className="ch-issue-img"
-                      onClick={() => setExpandedImg(issue.imageBase64)}
+                      onClick={e => { e.stopPropagation(); setExpandedImg(issue.imageBase64); }}
                       style={s.issueImg}
                     />
                   )}
@@ -313,7 +378,7 @@ export default function Home() {
               </div>
 
               {/* Actions */}
-              <div style={s.issueActions} className="ch-issue-actions">
+              <div style={s.issueActions} className="ch-issue-actions" onClick={e => e.stopPropagation()}>
                 <button className="ch-upvote-btn"
                   onClick={() => handleUpvote(issue.id)}
                   disabled={votedIssues.includes(issue.id)}
@@ -372,7 +437,18 @@ const s = {
   statCount: { fontSize: 28, fontWeight: 700, lineHeight: 1 },
   statLabel: { fontSize: 12, color: TEXT_MUTED, marginTop: 4, fontWeight: 500 },
 
-  mapWrap: { borderBottom: `1px solid ${BORDER_COL}` },
+  mapWrap: { borderBottom: `1px solid ${BORDER_COL}`, position: 'relative' },
+  mapLegend: {
+    position: 'absolute', bottom: 10, left: 10, zIndex: 1000,
+    background: 'rgba(255,255,255,.95)', borderRadius: 4,
+    padding: '6px 10px', display: 'flex', gap: 12, flexWrap: 'wrap',
+    fontSize: 11, boxShadow: '0 1px 4px rgba(0,0,0,.15)',
+    border: `1px solid ${BORDER_COL}`,
+  },
+  legendItem: { display: 'flex', alignItems: 'center', gap: 4, color: '#374151', fontWeight: 500 },
+  legendDot:  { width: 8, height: 8, borderRadius: '50%', display: 'inline-block' },
+
+  popupInner: { maxWidth: 220, fontFamily: "'Noto Sans', sans-serif" },
 
   listSection: { maxWidth: 1080, margin: '0 auto', padding: '28px 20px' },
   listHeader:  { marginBottom: 16 },
@@ -450,8 +526,6 @@ const s = {
     border: `1px solid ${BORDER_COL}`, fontSize: 13,
     cursor: 'pointer', background: '#f9fafb', color: '#111',
   },
-
-  infoWin: { maxWidth: 230, fontFamily: "'Noto Sans', sans-serif" },
 
   imgOverlay: {
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,.88)',
