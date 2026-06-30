@@ -21,7 +21,10 @@ const authRoutes = require('./src/routes/authRoutes');
 
 app.use('/api/issues', issueRoutes);
 app.use('/api/auth', authRoutes);
-
+// Health check / keep-alive endpoint — used by uptime monitor
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', time: new Date().toISOString() });
+});
 app.get('/', (req, res) => {
   res.json({ message: 'Community Hero API running' });
 });
